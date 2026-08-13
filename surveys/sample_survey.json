@@ -1,0 +1,31 @@
+{
+  "survey_id": "service_satisfaction",
+  "version": 1,
+  "title": "Service Satisfaction",
+  "intro": "Hello. We are conducting a short survey. Please answer using your keypad.",
+  "outro": "Thank you for your time. Goodbye.",
+  "questions": [
+    {
+      "id": "q1",
+      "text": "How satisfied are you with our service? Press 1 for Very Satisfied, 2 for Satisfied, 3 for Dissatisfied, or 4 for Very Dissatisfied.",
+      "timeout_ms": 15000,
+      "max_attempts": 2,
+      "options": {
+        "1": { "label": "Very Satisfied", "value": 4 },
+        "2": { "label": "Satisfied", "value": 3 },
+        "3": { "label": "Dissatisfied", "value": 2 },
+        "4": { "label": "Very Dissatisfied", "value": 1 }
+      }
+    },
+    {
+      "id": "q2",
+      "text": "Would you recommend us? Press 1 for Yes or 2 for No.",
+      "timeout_ms": 15000,
+      "max_attempts": 2,
+      "options": {
+        "1": { "label": "Yes", "value": 1 },
+        "2": { "label": "No", "value": 0 }
+      }
+    }
+  ]
+}
