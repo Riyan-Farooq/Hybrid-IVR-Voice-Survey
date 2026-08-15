@@ -27,6 +27,7 @@ MYSQL_CONFIG = {
 
 # Paths made dynamically absolute
 SURVEY_PATH = os.getenv("SURVEY_PATH", str(BASE_DIR / "surveys" / "sample_survey.json"))
+SURVEY_PATH_UR = os.getenv("SURVEY_PATH_UR", str(BASE_DIR / "surveys" / "sample_survey_ur.json"))
 SCHEMA_PATH = os.getenv("SCHEMA_PATH", str(BASE_DIR / "db" / "schema.sql"))
 AUDIO_CACHE_DIR = os.getenv("AUDIO_CACHE_DIR", str(BASE_DIR / "audio" / "cache"))
 

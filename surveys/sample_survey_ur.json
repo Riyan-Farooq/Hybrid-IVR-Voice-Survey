@@ -1,0 +1,50 @@
+{
+    "survey_id": "service_satisfaction",
+    "version": 2,
+    "locale": "ur-PK",
+    "title": "Service Satisfaction (Urdu)",
+    "intro": "Assalam-o-Alaikum. Hum aik mukhtasar survey kar rahe hain. Barah-e-karam apne keypad se jawab dein.",
+    "outro": "Aapka waqt dene ka shukriya. Khuda Hafiz.",
+    "questions": [
+        {
+            "id": "q1",
+            "text": "Aap hamari service se kitne mutmain hain? Bohat mutmain ke liye 1, mutmain ke liye 2, na-mutmain ke liye 3, ya bohat na-mutmain ke liye 4 dabayen.",
+            "timeout_ms": 15000,
+            "max_attempts": 2,
+            "options": {
+                "1": {
+                    "label": "Bohat Mutmain",
+                    "value": 4
+                },
+                "2": {
+                    "label": "Mutmain",
+                    "value": 3
+                },
+                "3": {
+                    "label": "Na-Mutmain",
+                    "value": 2
+                },
+                "4": {
+                    "label": "Bohat Na-Mutmain",
+                    "value": 1
+                }
+            }
+        },
+        {
+            "id": "q2",
+            "text": "Kya aap humein recommend karain ge? Haan ke liye 1 ya Nahi ke liye 2 dabayen.",
+            "timeout_ms": 15000,
+            "max_attempts": 2,
+            "options": {
+                "1": {
+                    "label": "Haan",
+                    "value": 1
+                },
+                "2": {
+                    "label": "Nahi",
+                    "value": 0
+                }
+            }
+        }
+    ]
+}

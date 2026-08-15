@@ -10,27 +10,52 @@ from survey_engine import Question, Survey, SurveyEngine
 from pathlib import Path
 
 
-def build_prompts(survey: Survey) -> dict[str, str]:
+def select_language(esl: ESLClient, channel_uuid: str) -> str:
+    """Play EN + UR prompts, wait for 1 (English) or 2 (Urdu)."""
+    en_path = tts.prompt("For English, press 1.", "en")
+    ur_path = tts.prompt("اردو کے لیے 2 دبائیں۔", "ur")
+
+    speak(esl, channel_uuid, en_path)
+    speak(esl, channel_uuid, ur_path)
+
+    for attempt in range(1, 3):
+        digit = esl.ask_question(
+            uuid=channel_uuid,
+            prompt="",
+            var_name=f"lang_select_{attempt}",
+            valid_digits="12",
+            timeout_ms=10000,
+            prompt_seconds=0,
+        )
+        if digit == "2":
+            return "ur"
+        if digit == "1":
+            return "en"
+
+    print("  No language selected — defaulting to English", flush=True)
+    return "en"
+
+
+def build_prompts(survey: Survey, language: str) -> dict[str, str]:
     """Generate and cache every audio prompt before the call starts."""
     print("Preparing audio prompts...", flush=True)
-    prompts: dict[str, str] = {"invalid": tts.prompt(config.TTS_INVALID_TEXT)}
+    prompts: dict[str, str] = {"invalid": tts.prompt(config.TTS_INVALID_TEXT, language)}
 
     if survey.intro_text:
-        prompts["intro"] = tts.prompt(survey.intro_text)
+        prompts["intro"] = tts.prompt(survey.intro_text, language)
     if survey.outro_text:
-        prompts["outro"] = tts.prompt(survey.outro_text)
+        prompts["outro"] = tts.prompt(survey.outro_text, language)
 
     for question in survey.questions:
         # A recorded file, when supplied, wins over synthesized speech.
         prompts[question.key] = (
             question.prompt_audio
             if question.prompt_audio
-            else tts.prompt(question.text)
+            else tts.prompt(question.text, language)
         )
 
     print(f"Audio ready ({len(prompts)} prompts cached)", flush=True)
     return prompts
-   
 
 
 def speak(esl: ESLClient, uuid: str, path: str | Path) -> None:
@@ -39,6 +64,7 @@ def speak(esl: ESLClient, uuid: str, path: str | Path) -> None:
 
     # tts.duration_seconds ko Path object pass karein aur esl.play ko str
     esl.play(uuid, str_path, tts.duration_seconds(path_obj))
+
 
 def show_question(index: int, total: int, question: Question) -> None:
     print("\n" + "-" * 55, flush=True)
@@ -85,32 +111,40 @@ def collect_answer(esl, db, channel_uuid, session_id, question, prompts):
 
     return "", question.max_attempts, None
 
+
 def run_survey() -> None:
     db = SurveyDatabase(config.SQLITE_PATH, config.SCHEMA_PATH)
     db.connect()
     db.init_schema()
 
-    survey_id = db.import_survey(config.SURVEY_PATH)
-    survey = SurveyEngine(db).load(survey_id)
-    total = len(survey.questions)
-
     print("=" * 55, flush=True)
-    print(f"SURVEY : {survey.key} v{survey.version} — {survey.title}", flush=True)
     print(f"CALLING: extension {config.TARGET_EXTENSION}", flush=True)
-    print(f"LOADED : {total} question(s)", flush=True)
     print("=" * 55, flush=True)
-
-    prompts = build_prompts(survey)
 
     esl = ESLClient(config.FS_HOST, config.FS_PORT, config.FS_PASSWORD)
     esl.connect()
 
     channel_uuid = call_id = session_id = None
     answers: list[tuple[str, str, str]] = []
+    total = 0
 
     try:
         channel_uuid = esl.originate(config.TARGET_EXTENSION)
         call_id = db.create_call(channel_uuid, to_number=config.TARGET_EXTENSION)
+
+        language = select_language(esl, channel_uuid)
+        print(f"\n[LANGUAGE] Caller selected: {language}", flush=True)
+
+        survey_path = config.SURVEY_PATH if language == "en" else config.SURVEY_PATH_UR
+        survey_id = db.import_survey(survey_path)
+        survey = SurveyEngine(db).load(survey_id)
+        total = len(survey.questions)
+
+        print(f"SURVEY : {survey.key} v{survey.version} — {survey.title}", flush=True)
+        print(f"LOADED : {total} question(s)", flush=True)
+
+        prompts = build_prompts(survey, language)
+
         session_id = db.start_session(survey.id, call_id, total)
 
         if "intro" in prompts:
