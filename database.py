@@ -3,7 +3,7 @@ import sqlite3
 import uuid as uuidlib
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 
 def _fmt(moment: datetime) -> str:
@@ -19,9 +19,12 @@ def _parse(stamp: str) -> datetime:
 
 
 class SurveyDatabase:
-   
-    def __init__(self, db_path: str = "survey.db", schema_path: str = "db/schema.sql"):
-        # Resolve path relative to project root if it's relative
+
+    def __init__(
+        self,
+        db_path: Union[str, Path] = "survey.db",
+        schema_path: Union[str, Path] = "db/schema.sql",
+    ):
         self.db_path = Path(db_path).resolve()
         self.schema_path = Path(schema_path).resolve()
         self._conn: Optional[sqlite3.Connection] = None
@@ -38,8 +41,11 @@ class SurveyDatabase:
         self._conn.execute("PRAGMA foreign_keys = ON")
 
     def init_schema(self) -> None:
-        self.conn.executescript(self.schema_path.read_text(encoding="utf-8"))
-        self.conn.commit()
+        if self.schema_path.exists():
+            self.conn.executescript(
+                self.schema_path.read_text(encoding="utf-8")
+            )
+            self.conn.commit()
 
     def close(self) -> None:
         if self._conn:
@@ -47,66 +53,89 @@ class SurveyDatabase:
             self._conn = None
 
     # ---------------------------------------------------------- definition
-
-    def import_survey(self, json_path: str) -> int:
+    def import_survey(self, json_path: Union[str, Path]) -> int:
         """Load a survey JSON into the database. Safe to call repeatedly."""
         data = json.loads(Path(json_path).read_text(encoding="utf-8"))
-        survey_key = data["survey_id"]
+        survey_key = data.get("survey_id") or data.get("key")
         version = int(data.get("version", 1))
 
         existing = self.conn.execute(
             "SELECT id FROM surveys WHERE survey_key = ? AND version = ?",
             (survey_key, version),
         ).fetchone()
+
         if existing:
-            return existing["id"]
+            return int(existing["id"])
 
         cursor = self.conn.execute(
-            "INSERT INTO surveys (survey_key, version, title, description, locale,"
-            " intro_text, outro_text, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')",
+            "INSERT INTO surveys (survey_key, version, title, description,"
+            " locale, intro_text, outro_text, status) VALUES (?, ?, ?, ?, ?,"
+            " ?, ?, 'active')",
             (
                 survey_key,
                 version,
                 data.get("title", survey_key),
                 data.get("description"),
-                data.get("locale", "en-US"),
-                data.get("intro"),
-                data.get("outro"),
+                data.get("locale", "ur-PK" if "ur" in str(json_path) else "en-US"),
+                data.get("intro") or data.get("intro_text"),
+                data.get("outro") or data.get("outro_text"),
             ),
         )
-        survey_id = cursor.lastrowid
 
-        for position, question in enumerate(data["questions"], start=1):
+        if cursor.lastrowid is None:
+            raise RuntimeError("Failed to obtain lastrowid for survey insert")
+        survey_id = int(cursor.lastrowid)
+
+        for position, question in enumerate(data.get("questions", []), start=1):
+            q_key = question.get("id") or question.get("key")
             question_cursor = self.conn.execute(
-                "INSERT INTO questions (survey_id, question_key, position, text,"
-                " prompt_audio, question_type, input_timeout_ms, max_attempts)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO questions (survey_id, question_key, position,"
+                " text, prompt_audio, question_type, input_timeout_ms,"
+                " max_attempts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     survey_id,
-                    question["id"],
+                    q_key,
                     position,
                     question["text"],
                     question.get("prompt_audio"),
                     question.get("type", "dtmf_choice"),
-                    int(question.get("timeout_ms", 15000)),
+                    int(
+                        question.get(
+                            "input_timeout_ms", question.get("timeout_ms", 15000)
+                        )
+                    ),
                     int(question.get("max_attempts", 3)),
                 ),
             )
-            question_id = question_cursor.lastrowid
 
-            options = question["options"].items()
-            for option_position, (option_key, option) in enumerate(options, start=1):
+            if question_cursor.lastrowid is None:
+                raise RuntimeError("Failed to obtain lastrowid for question insert")
+            question_id = int(question_cursor.lastrowid)
+
+            options = question.get("options", {})
+            opt_items = (
+                options.items() if isinstance(options, dict) else enumerate(options)
+            )
+
+            for option_position, (option_key, option) in enumerate(opt_items, start=1):
+                opt_k = str(option_key)
                 if isinstance(option, dict):
-                    label = option["label"]
-                    numeric_value = option.get("value")
+                    label = option.get("label", "")
+                    numeric_value = option.get("numeric_value", option.get("value"))
                 else:
-                    label = option
+                    label = str(option)
                     numeric_value = None
 
                 self.conn.execute(
-                    "INSERT INTO question_options (question_id, option_key, label,"
-                    " numeric_value, position) VALUES (?, ?, ?, ?, ?)",
-                    (question_id, option_key, label, numeric_value, option_position),
+                    "INSERT INTO question_options (question_id, option_key,"
+                    " label, numeric_value, position) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        question_id,
+                        opt_k,
+                        label,
+                        numeric_value,
+                        option_position,
+                    ),
                 )
 
         self.conn.commit()
@@ -128,7 +157,8 @@ class SurveyDatabase:
 
     def fetch_options(self, question_id: int) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT * FROM question_options WHERE question_id = ? ORDER BY position",
+            "SELECT * FROM question_options WHERE question_id = ? ORDER BY"
+            " position",
             (question_id,),
         ).fetchall()
 
@@ -160,7 +190,10 @@ class SurveyDatabase:
             ),
         )
         self.conn.commit()
-        return cursor.lastrowid
+
+        if cursor.lastrowid is None:
+            raise RuntimeError("Failed to obtain lastrowid for call creation")
+        return int(cursor.lastrowid)
 
     def finish_call(
         self, call_id: int, status: str, hangup_cause: Optional[str] = None
@@ -172,9 +205,13 @@ class SurveyDatabase:
         ended = datetime.now(timezone.utc)
         duration = talk = None
         if row:
-            duration = int((ended - _parse(row["initiated_at"])).total_seconds())
+            duration = int(
+                (ended - _parse(row["initiated_at"])).total_seconds()
+            )
             if row["answered_at"]:
-                talk = int((ended - _parse(row["answered_at"])).total_seconds())
+                talk = int(
+                    (ended - _parse(row["answered_at"])).total_seconds()
+                )
 
         self.conn.execute(
             "UPDATE calls SET status = ?, hangup_cause = ?, ended_at = ?,"
@@ -192,8 +229,8 @@ class SurveyDatabase:
         channel: str = "voice",
     ) -> int:
         cursor = self.conn.execute(
-            "INSERT INTO survey_sessions (session_uuid, survey_id, call_id, contact_id,"
-            " channel, status, questions_total, started_at)"
+            "INSERT INTO survey_sessions (session_uuid, survey_id, call_id,"
+            " contact_id, channel, status, questions_total, started_at)"
             " VALUES (?, ?, ?, ?, ?, 'in_progress', ?, ?)",
             (
                 str(uuidlib.uuid4()),
@@ -206,12 +243,15 @@ class SurveyDatabase:
             ),
         )
         self.conn.commit()
-        return cursor.lastrowid
+
+        if cursor.lastrowid is None:
+            raise RuntimeError("Failed to obtain lastrowid for session start")
+        return int(cursor.lastrowid)
 
     def finish_session(self, session_id: int, status: str) -> None:
         answered = self.conn.execute(
-            "SELECT COUNT(*) AS n FROM responses"
-            " WHERE session_id = ? AND outcome = 'answered'",
+            "SELECT COUNT(*) AS n FROM responses WHERE session_id = ? AND"
+            " outcome = 'answered'",
             (session_id,),
         ).fetchone()["n"]
 
@@ -228,26 +268,31 @@ class SurveyDatabase:
         self,
         session_id: int,
         question_id: int,
-        attempt_no: int,
-        raw_input: str,
+        attempt_number: int,
+        raw_input: Optional[str],
         outcome: str,
         response_ms: Optional[int] = None,
     ) -> None:
-        self.conn.execute(
-            "INSERT OR REPLACE INTO response_attempts (session_id, question_id,"
-            " attempt_no, raw_input, outcome, response_ms, occurred_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                session_id,
-                question_id,
-                attempt_no,
-                raw_input,
-                outcome,
-                response_ms,
-                utc_now(),
-            ),
-        )
-        self.conn.commit()
+        """Logs individual user response attempts (DTMF/Voice) into response_attempts table if exists."""
+        try:
+            self.conn.execute(
+                "INSERT INTO response_attempts (session_id, question_id,"
+                " attempt_number, raw_input, outcome, response_ms,"
+                " attempted_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    session_id,
+                    question_id,
+                    attempt_number,
+                    raw_input,
+                    outcome,
+                    response_ms,
+                    utc_now(),
+                ),
+            )
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            # Table might not exist in simple schemas; non-blocking fallback
+            pass
 
     def record_response(
         self,
@@ -256,25 +301,28 @@ class SurveyDatabase:
         option_id: Optional[int] = None,
         raw_input: Optional[str] = None,
         numeric_value: Optional[float] = None,
+        text_value: Optional[str] = None,
         outcome: str = "answered",
         attempts_used: int = 1,
         response_ms: Optional[int] = None,
     ) -> None:
         self.conn.execute(
-            "INSERT INTO responses (session_id, question_id, option_id, raw_input,"
-            " numeric_value, outcome, attempts_used, response_ms, answered_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(session_id, question_id) DO UPDATE SET"
-            " option_id = excluded.option_id, raw_input = excluded.raw_input,"
-            " numeric_value = excluded.numeric_value, outcome = excluded.outcome,"
-            " attempts_used = excluded.attempts_used,"
-            " response_ms = excluded.response_ms, answered_at = excluded.answered_at",
+            "INSERT INTO responses (session_id, question_id, option_id,"
+            " raw_input, numeric_value, text_value, outcome, attempts_used,"
+            " response_ms, answered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(session_id, question_id) DO UPDATE SET option_id ="
+            " excluded.option_id, raw_input = excluded.raw_input, numeric_value"
+            " = excluded.numeric_value, text_value = excluded.text_value,"
+            " outcome = excluded.outcome, attempts_used ="
+            " excluded.attempts_used, response_ms = excluded.response_ms,"
+            " answered_at = excluded.answered_at",
             (
                 session_id,
                 question_id,
                 option_id,
                 raw_input,
                 numeric_value,
+                text_value,
                 outcome,
                 attempts_used,
                 response_ms,

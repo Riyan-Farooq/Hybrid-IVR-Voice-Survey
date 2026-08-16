@@ -1,5 +1,7 @@
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv()
 
 # Project ki root directory jahan config.py pari hui hai
 BASE_DIR = Path(__file__).resolve().parent
@@ -38,3 +40,5 @@ TTS_INVALID_TEXT = os.getenv(
     "TTS_INVALID_TEXT",
     "Sorry, that is not a valid choice. Please try again.",
 )
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+RECORDINGS_DIR = os.getenv("RECORDINGS_DIR", str(BASE_DIR / "recordings"))

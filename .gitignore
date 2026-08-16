@@ -1,4 +1,22 @@
+# Virtual Environment
 .venv/
-audio/cache/
+env/
+venv/
+
+# Environment Variables & Secrets (CRITICAL)
+.env
+*.env
+
+# Python Cache
 __pycache__/
 *.pyc
+
+# Generated Audio & Recordings
+recordings/
+audio_cache/
+*.wav
+*.mp3
+
+# Databases / Logs
+*.db
+*.log

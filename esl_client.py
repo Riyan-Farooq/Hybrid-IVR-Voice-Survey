@@ -30,30 +30,55 @@ class ESLClient:
 
     def close(self) -> None:
         if self._sock:
-            self._sock.close()
+            try:
+                self._sock.close()
+            except OSError:
+                pass
             self._sock = None
 
     def _send(self, cmd: str) -> None:
-        self._sock.sendall(f"{cmd}\n\n".encode())
+        if not self._sock:
+            raise ConnectionError("ESL socket is not connected")
+        try:
+            self._sock.sendall(f"{cmd}\n\n".encode("utf-8"))
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            raise ConnectionError(f"Failed to send command to ESL: {e}") from e
 
     def _recv_headers(self) -> str:
+        if not self._sock:
+            raise ConnectionError("ESL socket is not connected")
+
         while b"\n\n" not in self._buffer:
-            chunk = self._sock.recv(4096)
+            try:
+                chunk = self._sock.recv(4096)
+            except OSError as e:
+                raise ConnectionError(f"ESL socket read error: {e}") from e
+
             if not chunk:
-                raise ConnectionError("ESL connection closed")
+                raise ConnectionError("ESL connection closed by remote host")
             self._buffer += chunk
+
         idx = self._buffer.index(b"\n\n") + 2
         headers, self._buffer = self._buffer[:idx], self._buffer[idx:]
-        return headers.decode(errors="replace")
+        return headers.decode("utf-8", errors="replace")
 
     def _recv_body(self, length: int) -> str:
+        if not self._sock:
+            raise ConnectionError("ESL socket is not connected")
+
         while len(self._buffer) < length:
-            chunk = self._sock.recv(length - len(self._buffer))
+            needed = length - len(self._buffer)
+            try:
+                chunk = self._sock.recv(min(needed, 4096))
+            except OSError as e:
+                raise ConnectionError(f"ESL socket read error during body fetch: {e}") from e
+
             if not chunk:
-                break
+                raise ConnectionError("ESL connection closed while reading body")
             self._buffer += chunk
+
         body, self._buffer = self._buffer[:length], self._buffer[length:]
-        return body.decode(errors="replace")
+        return body.decode("utf-8", errors="replace")
 
     def _read_message(self) -> tuple[str, str]:
         """Return (headers, body)."""
@@ -64,7 +89,7 @@ class ESLClient:
             if line.lower().startswith("content-length:"):
                 length = int(line.split(":", 1)[1].strip())
 
-        body = self._recv_body(length) if length else ""
+        body = self._recv_body(length) if length > 0 else ""
         return headers, body
 
     @staticmethod
@@ -101,8 +126,6 @@ class ESLClient:
         return self.api(f"sofia_contact {extension}").startswith("sofia/")
 
     def originate(self, extension: str, caller_id: str = "") -> str:
-        # &park() keeps the channel alive. 'answer,park' is treated as a
-        # dialplan extension name and the call hangs up immediately.
         dial = f"{{originate_timeout=60}}user/{extension} &park()"
         print(f"\n>>> Dialing user/{extension} — answer MicroSIP now...", flush=True)
 
@@ -147,11 +170,9 @@ class ESLClient:
         if not self.channel_exists(uuid):
             raise RuntimeError("Call already ended")
 
-        # Play the spoken question first.
         if prompt_seconds > 0:
             self.play(uuid, prompt, prompt_seconds)
 
-        # Then wait for one valid DTMF digit.
         args = (
             f"1 1 1 {timeout_ms} # "
             f"silence_stream://250 silence_stream://250 "
@@ -173,7 +194,46 @@ class ESLClient:
             time.sleep(0.5)
 
         return ""
+    def get_digits_only(
+        self,
+        uuid: str,
+        var_name: str,
+        valid_digits: str,
+        timeout_ms: int = 20000,
+    ) -> str:
+        """Wait for DTMF without playing anything (prompt already played separately)."""
+        if not self.channel_exists(uuid):
+            raise RuntimeError("Call already ended")
+
+        args = (
+            f"1 1 1 {timeout_ms} # "
+            f"silence_stream://250 silence_stream://250 "
+            f"{var_name} [{valid_digits}] 2000"
+        )
+        self.execute_app(uuid, "play_and_get_digits", args)
+
+        print("    ... waiting for keypad response ...", flush=True)
+        deadline = time.time() + (timeout_ms / 1000) + 5
+
+        while time.time() < deadline:
+            if not self.channel_exists(uuid):
+                raise RuntimeError("Call ended while waiting for digit")
+            value = self.get_var(uuid, var_name)
+            if value:
+                return value
+            time.sleep(0.5)
+
+        return ""
 
     def hangup(self, uuid: str) -> None:
         if self.channel_exists(uuid):
             self.api(f"uuid_kill {uuid}")
+
+    def start_recording(self, uuid: str, path: str, limit_secs: int = 10) -> None:
+        if not self.channel_exists(uuid):
+            raise RuntimeError("Call already ended")
+        self.api(f"uuid_record {uuid} start {path} {limit_secs}")
+
+    def stop_recording(self, uuid: str, path: str) -> None:
+        if self.channel_exists(uuid):
+            self.api(f"uuid_record {uuid} stop {path}")
