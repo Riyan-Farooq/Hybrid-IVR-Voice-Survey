@@ -83,3 +83,26 @@ def classify_response(transcript: str, question: Question) -> Optional[str]:
         return None
 
     return option_key
+def translate_to_english(transcript: str) -> str:
+    """Translate any-language transcript to English using the LLM."""
+    if not transcript:
+        return ""
+
+    system_prompt = (
+        "Translate the following text to English. "
+        "Reply with ONLY the translated text, nothing else — no quotes, "
+        "no explanation. If it is already in English, return it unchanged."
+    )
+
+    client = _get_client()
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": transcript},
+        ],
+        temperature=0.1,
+        max_tokens=300,
+    )
+
+    return (completion.choices[0].message.content or "").strip()

@@ -1,50 +1,40 @@
 {
-    "survey_id": "service_satisfaction",
-    "version": 2,
-    "locale": "ur-PK",
-    "title": "Service Satisfaction (Urdu)",
-    "intro": "Assalam-o-Alaikum. Hum aik mukhtasar survey kar rahe hain. Barah-e-karam apne keypad se jawab dein.",
-    "outro": "Aapka waqt dene ka shukriya. Khuda Hafiz.",
-    "questions": [
-        {
-            "id": "q1",
-            "text": "Aap hamari service se kitne mutmain hain? Bohat mutmain ke liye 1, mutmain ke liye 2, na-mutmain ke liye 3, ya bohat na-mutmain ke liye 4 dabayen.",
-            "timeout_ms": 15000,
-            "max_attempts": 2,
-            "options": {
-                "1": {
-                    "label": "Bohat Mutmain",
-                    "value": 4
-                },
-                "2": {
-                    "label": "Mutmain",
-                    "value": 3
-                },
-                "3": {
-                    "label": "Na-Mutmain",
-                    "value": 2
-                },
-                "4": {
-                    "label": "Bohat Na-Mutmain",
-                    "value": 1
-                }
-            }
-        },
-        {
-            "id": "q2",
-            "text": "Kya aap humein recommend karain ge? Haan ke liye 1 ya Nahi ke liye 2 dabayen.",
-            "timeout_ms": 15000,
-            "max_attempts": 2,
-            "options": {
-                "1": {
-                    "label": "Haan",
-                    "value": 1
-                },
-                "2": {
-                    "label": "Nahi",
-                    "value": 0
-                }
-            }
-        }
-    ]
+  "survey_id": "service_satisfaction",
+  "version": 4,
+  "locale": "ur-PK",
+  "title": "Service Satisfaction (Urdu)",
+  "intro": "السلام علیکم۔ ہم ایک مختصر سروے کر رہے ہیں۔ براہ کرم اپنے کی پیڈ سے جواب دیں۔",
+  "outro": "آپ کا وقت دینے کا شکریہ۔ خدا حافظ۔",
+  "questions": [
+    {
+      "id": "q1",
+      "text": "آپ ہماری سروس سے کتنے مطمئن ہیں؟ بہت مطمئن کے لیے ایک، مطمئن کے لیے دو، غیر مطمئن کے لیے تین، یا بہت غیر مطمئن کے لیے چار دبائیں۔",
+      "timeout_ms": 15000,
+      "max_attempts": 2,
+      "options": {
+        "1": { "label": "بہت مطمئن", "value": 4 },
+        "2": { "label": "مطمئن", "value": 3 },
+        "3": { "label": "غیر مطمئن", "value": 2 },
+        "4": { "label": "بہت غیر مطمئن", "value": 1 }
+      }
+    },
+    {
+      "id": "q1b",
+      "text": "ہمیں افسوس ہے۔ براہ کرم اپنے الفاظ میں بتائیں کہ آپ مطمئن کیوں نہیں تھے۔",
+      "timeout_ms": 15000,
+      "max_attempts": 1,
+      "type": "speech",
+      "options": {}
+    },
+    {
+      "id": "q2",
+      "text": "کیا آپ ہمیں تجویز کریں گے؟ ہاں کے لیے ایک یا نہیں کے لیے دو دبائیں۔",
+      "timeout_ms": 15000,
+      "max_attempts": 2,
+      "options": {
+        "1": { "label": "ہاں", "value": 1 },
+        "2": { "label": "نہیں", "value": 0 }
+      }
+    }
+  ]
 }

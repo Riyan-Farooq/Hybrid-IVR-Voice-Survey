@@ -9,6 +9,10 @@ from database import SurveyDatabase
 from esl_client import ESLClient
 from survey_engine import Question, Survey, SurveyEngine
 
+# If the caller's satisfaction option has numeric_value <= this, ask the
+# open-ended "why weren't you satisfied" follow-up question.
+DISSATISFIED_THRESHOLD = 2
+
 
 def select_language(esl: ESLClient, channel_uuid: str) -> str:
     """Play EN + UR prompts, wait for 1 (English) or 2 (Urdu)."""
@@ -80,7 +84,6 @@ def collect_answer(esl, db, channel_uuid, session_id, question, prompts):
     Returns: (option_key, transcript_or_None, attempts_used, response_ms)
     """
     prompt_path = prompts[question.key]
-    prompt_seconds = tts.duration_seconds(prompt_path)
 
     for attempt in range(1, question.max_attempts + 1):
         if attempt > 1:
@@ -97,7 +100,6 @@ def collect_answer(esl, db, channel_uuid, session_id, question, prompts):
         # leaks into the caller's answer.
         speak(esl, channel_uuid, prompt_path)
 
-        # NOW start recording — only the caller's voice from here on.
         try:
             esl.start_recording(channel_uuid, recording_path)
         except RuntimeError:
@@ -113,12 +115,10 @@ def collect_answer(esl, db, channel_uuid, session_id, question, prompts):
         esl.stop_recording(channel_uuid, recording_path)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
 
-        # --- Path 1: valid keypad digit — DTMF wins, don't even look at audio ---
         if digit in question.options:
             db.record_attempt(session_id, question.id, attempt, digit, "valid", elapsed_ms)
             return digit, None, attempt, elapsed_ms
 
-        # --- Path 2: no valid digit — try the spoken answer instead ---
         transcript = ""
         option_key = None
         recording_file = Path(recording_path)
@@ -134,13 +134,61 @@ def collect_answer(esl, db, channel_uuid, session_id, question, prompts):
             db.record_attempt(session_id, question.id, attempt, transcript, "valid", elapsed_ms)
             return option_key, transcript, attempt, elapsed_ms
 
-        # --- Path 3: neither worked — log and retry ---
         outcome = "invalid" if (digit or transcript) else "no_input"
         db.record_attempt(
             session_id, question.id, attempt, digit or transcript, outcome, elapsed_ms
         )
 
     return "", None, question.max_attempts, None
+
+
+def collect_open_response(esl, db, channel_uuid, session_id, question, prompts) -> str:
+    """
+    For free-text follow-up questions (no fixed options): play the prompt,
+    record the caller's answer, transcribe it, and translate it to English.
+    Returns the English translation (empty string if nothing usable was captured).
+    """
+    prompt_path = prompts[question.key]
+    record_seconds = 15
+
+    recording_path = tts.fs_path(
+        Path(config.RECORDINGS_DIR) / f"{channel_uuid}_{question.key}_1.wav"
+    )
+
+    started = time.perf_counter()
+    speak(esl, channel_uuid, prompt_path)
+
+    try:
+        esl.start_recording(channel_uuid, recording_path, limit_secs=record_seconds)
+    except RuntimeError:
+        pass
+
+    print("    ... listening for open-ended answer ...", flush=True)
+    time.sleep(record_seconds)
+
+    esl.stop_recording(channel_uuid, recording_path)
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+
+    transcript = ""
+    translated = ""
+    recording_file = Path(recording_path)
+    if recording_file.exists() and recording_file.stat().st_size > 1000:
+        try:
+            transcript = speech_agent.transcribe(recording_path)
+            translated = speech_agent.translate_to_english(transcript)
+        except Exception as exc:
+            print(f"    Speech agent error: {exc}", flush=True)
+
+    db.record_response(
+        session_id,
+        question.id,
+        raw_input=transcript or None,
+        text_value=translated or None,
+        outcome="answered" if translated else "no_input",
+        attempts_used=1,
+        response_ms=elapsed_ms,
+    )
+    return translated
 
 
 def run_survey() -> None:
@@ -183,7 +231,28 @@ def run_survey() -> None:
             print(f"\n[INTRO] {survey.intro_text}", flush=True)
             speak(esl, channel_uuid, prompts["intro"])
 
+        ask_followup = False
+
         for index, question in enumerate(survey.questions, start=1):
+            # Open-ended questions (no fixed options) are conditional —
+            # only asked when the previous answer set ask_followup = True.
+            if not question.options:
+                if not ask_followup:
+                    db.record_response(
+                        session_id, question.id, outcome="skipped", attempts_used=0
+                    )
+                    continue
+
+                show_question(index, total, question)
+                translated = collect_open_response(
+                    esl, db, channel_uuid, session_id, question, prompts
+                )
+                if translated:
+                    print(f"  FOLLOW-UP (English): {translated}", flush=True)
+                else:
+                    print("  NO ANSWER captured for follow-up", flush=True)
+                continue
+
             show_question(index, total, question)
 
             try:
@@ -200,6 +269,7 @@ def run_survey() -> None:
                 db.record_response(
                     session_id, question.id, outcome="no_input", attempts_used=attempts
                 )
+                ask_followup = False
                 continue
 
             option = question.options[answer_key]
@@ -219,12 +289,22 @@ def run_survey() -> None:
                 response_ms=elapsed_ms,
             )
 
+            ask_followup = (
+                option.numeric_value is not None
+                and option.numeric_value <= DISSATISFIED_THRESHOLD
+            )
+
         if "outro" in prompts and esl.channel_exists(channel_uuid):
             print(f"\n[OUTRO] {survey.outro_text}", flush=True)
             speak(esl, channel_uuid, prompts["outro"])
 
+        answered_count = db.conn.execute(
+            "SELECT COUNT(*) AS n FROM responses WHERE session_id = ? AND outcome = 'answered'",
+            (session_id,),
+        ).fetchone()["n"]
+
         if session_id:
-            db.finish_session(session_id, "completed" if len(answers) == total else "partial")
+            db.finish_session(session_id, "completed" if answered_count >= total - 1 else "partial")
         if call_id:
             db.finish_call(call_id, "completed")
 

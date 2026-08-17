@@ -1,8 +1,9 @@
 {
-  "survey_id": "service_satisfaction",
-  "version": 1,
-  "title": "Service Satisfaction",
-  "intro": "Hello. We are conducting a short survey. Please answer using your keypad.",
+  "survey_id": "service_satisfaction_en",
+  "version": 2,
+  "locale": "en-US",
+  "title": "Service Satisfaction (English)",
+  "intro": "Hello. We are conducting a brief survey. Please respond using your keypad or voice.",
   "outro": "Thank you for your time. Goodbye.",
   "questions": [
     {
@@ -18,8 +19,16 @@
       }
     },
     {
+      "id": "q1b",
+      "text": "We're sorry to hear that. In your own words, please tell us why you were not satisfied.",
+      "timeout_ms": 15000,
+      "max_attempts": 1,
+      "type": "speech",
+      "options": {}
+    },
+    {
       "id": "q2",
-      "text": "Would you recommend us? Press 1 for Yes or 2 for No.",
+      "text": "Would you recommend us? Press 1 for Yes, or 2 for No.",
       "timeout_ms": 15000,
       "max_attempts": 2,
       "options": {
